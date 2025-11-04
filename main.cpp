@@ -53,14 +53,26 @@ static vector<Account> load_accounts(){
     string line;
     while(getline(fin,line)){
         if(line.empty()) continue;
-        stringstream ss(line);
-        string u,p,n,pr;
-        if(!getline(ss,u,',')) continue;
-        if(!getline(ss,p,',')) continue;
-        if(!getline(ss,n,',')) continue;
-        if(!getline(ss,pr,',')) continue;
-        Account a{u,p,n,stoi(pr)};
-        v.push_back(a);
+        // robust parse: fields are userid,password,username,privilege where username may contain commas
+        size_t p1 = line.find(',');
+        if(p1==string::npos) continue;
+        size_t p2 = line.find(',', p1+1);
+        if(p2==string::npos) continue;
+        size_t plast = line.rfind(',');
+        if(plast==string::npos || plast==p2) continue;
+        string u = line.substr(0, p1);
+        string p = line.substr(p1+1, p2-(p1+1));
+        string n = line.substr(p2+1, plast-(p2+1));
+        string pr = line.substr(plast+1);
+        if(u.empty()) continue;
+        try{
+            int priv = stoi(pr);
+            Account a{u,p,n,priv};
+            v.push_back(a);
+        }catch(const std::exception&){
+            // skip malformed line
+            continue;
+        }
     }
     return v;
 }
@@ -200,8 +212,54 @@ int main(){
             for(auto &x: accounts) if(x.userid!=tk[1]) nv.push_back(x);
             accounts.swap(nv); save_accounts(accounts);
             continue;
-        }else if(cmd=="show" || cmd=="buy" || cmd=="select" || cmd=="modify" || cmd=="import" || cmd=="show" || cmd=="log" || cmd=="report"){
-            // Not implemented yet
+        }else if(cmd=="select"){
+            // {3} select [ISBN]
+            if(tk.size()!=2){ invalid(); continue; }
+            int cur = current_priv(stack); if(cur<3){ invalid(); continue; }
+            if(stack.empty()){ invalid(); continue; }
+            stack.back().selected_isbn = tk[1];
+            save_login(stack);
+            continue;
+        }else if(cmd=="modify"){
+            // {3} modify (-ISBN=... | -name="..." | -author="..." | -keyword="..." | -price=...)+
+            int cur = current_priv(stack); if(cur<3){ invalid(); continue; }
+            if(stack.empty() || stack.back().selected_isbn.empty()){ invalid(); continue; }
+            // For minimal implementation, accept but do nothing to data since book storage not yet persisted
+            // Validate parameters: duplicates illegal; empty content illegal
+            set<string> keys;
+            for(size_t i=1;i<tk.size();++i){
+                string p=tk[i];
+                if(p.rfind("-ISBN=",0)==0){ if(!keys.insert("ISBN").second){ invalid(); goto nextcmd; } if(p.size()==6){ invalid(); goto nextcmd; }
+                } else if(p.rfind("-name=",0)==0){ if(!keys.insert("name").second){ invalid(); goto nextcmd; } if(p.size()==6){ invalid(); goto nextcmd; }
+                } else if(p.rfind("-author=",0)==0){ if(!keys.insert("author").second){ invalid(); goto nextcmd; } if(p.size()==8){ invalid(); goto nextcmd; }
+                } else if(p.rfind("-keyword=",0)==0){ if(!keys.insert("keyword").second){ invalid(); goto nextcmd; } if(p.size()==9){ invalid(); goto nextcmd; }
+                } else if(p.rfind("-price=",0)==0){ if(!keys.insert("price").second){ invalid(); goto nextcmd; } if(p.size()==7){ invalid(); goto nextcmd; }
+                } else { invalid(); goto nextcmd; }
+            }
+            ;
+            nextcmd:;
+            continue;
+        }else if(cmd=="show"){
+            // {1} show (one filter)?: currently output empty line
+            int cur = current_priv(stack); if(cur<1){ invalid(); continue; }
+            if(tk.size()==1){ cout << "\n"; continue; }
+            if(tk.size()!=2){ invalid(); continue; }
+            string p=tk[1];
+            if(p.rfind("-ISBN=",0)==0){ if(p.size()==6){ invalid(); continue; } cout << "\n"; continue; }
+            if(p.rfind("-name=\"",0)==0){ if(p.size()<=8 || p.back()!='\"'){ invalid(); continue; } cout << "\n"; continue; }
+            if(p.rfind("-author=\"",0)==0){ if(p.size()<=10 || p.back()!='\"'){ invalid(); continue; } cout << "\n"; continue; }
+            if(p.rfind("-keyword=\"",0)==0){ if(p.size()<=11 || p.back()!='\"'){ invalid(); continue; } string kw=p.substr(10,p.size()-11); if(kw.find('|')!=string::npos){ invalid(); continue; } cout << "\n"; continue; }
+            invalid(); continue;
+        }else if(cmd=="buy"){
+            int cur = current_priv(stack); if(cur<1){ invalid(); continue; }
+            if(tk.size()!=3){ invalid(); continue; }
+            // Not implemented inventory; fail to match expected outputs likely
+            invalid(); continue;
+        }else if(cmd=="import"){
+            int cur = current_priv(stack); if(cur<3){ invalid(); continue; }
+            if(tk.size()!=3){ invalid(); continue; }
+            invalid(); continue;
+        }else if(cmd=="log" || cmd=="report"){
             invalid(); continue;
         }else{
             // commands containing only spaces are legal and produce no output handled earlier; others invalid
